@@ -1,64 +1,37 @@
 #define TILE_SIZE 32
 #define WPT 16
 #define RTS 2
-__kernel void wide_matrix_mul(const int M, const int N, const int K,
-    const __global floatX* A,
-    const __global floatX* B,
-    __global floatX* C) {
-    const int lx = get_local_id(0);
-    const int ly = get_local_id(1);
-    const int gx = (TILE_SIZE / 4) * get_group_id(0) + lx; /
-    const int gy = TILE_SIZE * get_group_id(1) + ly; 
-    __local floatX tileA[TILE_SIZE][TILE_SIZE / 4];
-    __local floatX tileB[TILE_SIZE][TILE_SIZE / 4];
-    const int numTiles = K / TILE_SIZE;
-    for (int t = 0; t < numTiles; t++) {
-
-        // Load one tile of A and B into local memory
-        const int tiledRow = (TILE_SIZE / WIDTH) * tile + lx;
-        const int tiledCol = TILE_SIZE * tile + ly;
-        tileA[ly][lx] = A[tiledCol * (M / WIDTH) + gx];
-        tileB[ly][lx] = B[gy * (K / WIDTH) + tiledRow];
-
-        // Synchronise to make sure the tile is loaded
+__kernel void local_per_thread_mul(
+    __global float* X,
+    __global float* Y,
+    __global float* S,
+    const int K) {
+    const int row = get_local_id(0); 
+    const int col = get_local_id(1); 
+    const int globalRow = TILE_SIZE * get_group_id(0) + row;
+    const int globalCol = TILE_SIZE * get_group_id(1) + col; 
+    __local float localX[TILE_SIZE][TILE_SIZE];
+    __local float localY[TILE_SIZE][TILE_SIZE];
+    float res[WPT];
+    for (int w = 0; w < WPT; w++) {
+        res[w] = 0.0f;
+    }
+    for (int t = 0; t < K / TILE_SIZE; t++) {
+        for (int w = 0; w < WPT; w++) {
+            const int tiledRow = TILE_SIZE * t + row;
+            const int tiledCol = TILE_SIZE * t + col;
+            localX[col + w * RTS][row] = X[(tiledCol + w * RTS) * K + globalRow];
+            localY[col + w * RTS][row] = Y[(globalCol + w * RTS) * K + tiledRow];
+        }
         barrier(CLK_LOCAL_MEM_FENCE);
-
-        // Perform the computation for a single tile
-        floatX vecA, vecB;
-        float valB;
-        for (int k = 0; k < TILE_SIZE / WIDTH; k++) {
-            vecB = tileB[ly][k];
-            for (int w = 0; w < WIDTH; w++) {
-                vecA = tileA[WIDTH * k + w][lx];
-#if WIDTH == 1
-                valB = vecB;
-                acc += vecA * valB;
-#elif WIDTH == 2
-                switch (w) {
-                case 0: valB = vecB.x; break;
-                case 1: valB = vecB.y; break;
-                }
-                acc.x += vecA.x * valB;
-                acc.y += vecA.y * valB;
-#elif WIDTH == 4
-                switch (w) {
-                case 0: valB = vecB.x; break;
-                case 1: valB = vecB.y; break;
-                case 2: valB = vecB.z; break;
-                case 3: valB = vecB.w; break;
-                }
-                acc.x += vecA.x * valB;
-                acc.y += vecA.y * valB;
-                acc.z += vecA.z * valB;
-                acc.w += vecA.w * valB;
-#endif
+        for (int k = 0; k < TILE_SIZE; k++) {
+            for (int w = 0; w < WPT; w++) {
+                res[w] += localX[k][row] * localY[col + w * RTS][k];
             }
         }
-
-        // Synchronise before loading the next tile
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-
-    // Store the final results in C
-    C[gy * (M / WIDTH) + gx] = acc;
+    for (int w = 0; w < WPT; w++) {
+        S[(globalCol + w * RTS) * K + globalRow] = res[w];
+    }
 }
