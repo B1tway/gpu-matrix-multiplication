@@ -1,7 +1,7 @@
 
 #define TILE_SIZE 32
 
-__kernel void matrix_transpose(__global const float* matrix, __global float* matrix_transpose, const unsigned int M, const unsigned int Ks)
+__kernel void matrix_transpose(__global const float* matrix, __global float* matrix_transpose, const unsigned int M, const unsigned int K)
 {
    __local float local_matrix[WORK_GROUP_SIZE][WORK_GROUP_SIZE+1];
 
