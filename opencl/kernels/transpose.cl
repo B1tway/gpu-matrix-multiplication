@@ -1,20 +1,21 @@
 
 #define TILE_SIZE 32
 
-__kernel void matrix_transpose(__global float* a,
-    __global float* b,
-    unsigned int rows,
-    unsigned int cols)
+__kernel void matrix_transpose(__global const float* matrix, __global float* matrix_transpose, const unsigned int M, const unsigned int Ks)
 {
-    size_t gx = get_global_id(0);
-    size_t gy = get_global_id(1);
-    size_t lx = get_local_id(0);
-    size_t ly = get_local_id(1);
-    __local float tile[TILE_SIZE][TILE_SIZE + 1];
-    if (gx < rows && gy < cols) {
-        tile[ly][lx] = a[gy * rows + gx];
-        barrier(CLK_LOCAL_MEM_FENCE);
-        b[gy * rows + gx] = tile[lx][ly];
-    }
-   
+   __local float local_matrix[WORK_GROUP_SIZE][WORK_GROUP_SIZE+1];
+
+    const unsigned int i = get_global_id(0);
+    const unsigned int j = get_global_id(1);
+    const unsigned int local_i = get_local_id(0);
+    const unsigned int local_j = get_local_id(1);
+    const unsigned int group_i = get_group_id(0);
+    const unsigned int group_j = get_group_id(1);
+    if (i < K && j < M)
+        local_matrix[local_j][local_i] = matrix[j * K + i];
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (group_i * WORK_GROUP_SIZE + local_j < K && group_j * WORK_GROUP_SIZE + local_i < M)
+        matrix_transpose[(group_i * WORK_GROUP_SIZE + local_j) * M + group_j * WORK_GROUP_SIZE + local_i] = local_matrix[local_i][local_j];
 }
